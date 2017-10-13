@@ -416,7 +416,7 @@ PONY_API pony_msg_t* pony_alloc_msg_size(size_t size, uint32_t id)
 }
 
 PONY_API void pony_sendv(pony_ctx_t* ctx, pony_actor_t* to, pony_msg_t* first,
-  pony_msg_t* last)
+  pony_msg_t* last, bool has_app_msg)
 {
   // The function takes a prebuilt chain instead of varargs because the latter
   // is expensive and very hard to optimise.
@@ -438,7 +438,8 @@ PONY_API void pony_sendv(pony_ctx_t* ctx, pony_actor_t* to, pony_msg_t* first,
         (uintptr_t)ctx->current, (uintptr_t)to);
   }
 
-  ponyint_maybe_mute(ctx, to, first, last);
+  if(has_app_msg)
+    ponyint_maybe_mute(ctx, to);
 
   if(ponyint_messageq_push(&to->q, first, last))
   {
@@ -450,7 +451,7 @@ PONY_API void pony_sendv(pony_ctx_t* ctx, pony_actor_t* to, pony_msg_t* first,
 }
 
 PONY_API void pony_sendv_single(pony_ctx_t* ctx, pony_actor_t* to,
-  pony_msg_t* first, pony_msg_t* last)
+  pony_msg_t* first, pony_msg_t* last, bool has_app_msg)
 {
   // The function takes a prebuilt chain instead of varargs because the latter
   // is expensive and very hard to optimise.
@@ -472,7 +473,8 @@ PONY_API void pony_sendv_single(pony_ctx_t* ctx, pony_actor_t* to,
         (uintptr_t)ctx->current, (uintptr_t)to);
   }
 
-  ponyint_maybe_mute(ctx, to, first, last);
+  if(has_app_msg)
+    ponyint_maybe_mute(ctx, to);
 
   if(ponyint_messageq_push_single(&to->q, first, last))
   {
@@ -485,8 +487,7 @@ PONY_API void pony_sendv_single(pony_ctx_t* ctx, pony_actor_t* to,
   }
 }
 
-void ponyint_maybe_mute(pony_ctx_t* ctx, pony_actor_t* to, pony_msg_t* first,
-  pony_msg_t* last)
+void ponyint_maybe_mute(pony_ctx_t* ctx, pony_actor_t* to)
 {
   if(ctx->current != NULL)
   {
@@ -500,29 +501,7 @@ void ponyint_maybe_mute(pony_ctx_t* ctx, pony_actor_t* to, pony_msg_t* first,
        (atomic_load_explicit(&to->muted, memory_order_relaxed) > 0)) &&
       !has_flag(ctx->current, FLAG_OVERLOADED) &&
       ctx->current != to)
-    {
-      if (first == last)
-      {
-        if(first->id <= ACTORMSG_APPLICATION_START)
-        {
-          ponyint_sched_mute(ctx, ctx->current, to);
-          return;
-        }
-      }
-
-      pony_msg_t* m = first;
-
-      while(m != last)
-      {
-        if(m->id <= ACTORMSG_APPLICATION_START)
-        {
-          ponyint_sched_mute(ctx, ctx->current, to);
-          return;
-        }
-
-        m = atomic_load_explicit(&m->next, memory_order_relaxed);
-      }
-    }
+      ponyint_sched_mute(ctx, ctx->current, to);
   }
 }
 
@@ -535,7 +514,7 @@ PONY_API void pony_chain(pony_msg_t* prev, pony_msg_t* next)
 PONY_API void pony_send(pony_ctx_t* ctx, pony_actor_t* to, uint32_t id)
 {
   pony_msg_t* m = pony_alloc_msg(POOL_INDEX(sizeof(pony_msg_t)), id);
-  pony_sendv(ctx, to, m, m);
+  pony_sendv(ctx, to, m, m, id <= ACTORMSG_APPLICATION_START);
 }
 
 PONY_API void pony_sendp(pony_ctx_t* ctx, pony_actor_t* to, uint32_t id,
@@ -545,7 +524,7 @@ PONY_API void pony_sendp(pony_ctx_t* ctx, pony_actor_t* to, uint32_t id,
     POOL_INDEX(sizeof(pony_msgp_t)), id);
   m->p = p;
 
-  pony_sendv(ctx, to, &m->msg, &m->msg);
+  pony_sendv(ctx, to, &m->msg, &m->msg, id <= ACTORMSG_APPLICATION_START);
 }
 
 PONY_API void pony_sendi(pony_ctx_t* ctx, pony_actor_t* to, uint32_t id,
@@ -555,7 +534,7 @@ PONY_API void pony_sendi(pony_ctx_t* ctx, pony_actor_t* to, uint32_t id,
     POOL_INDEX(sizeof(pony_msgi_t)), id);
   m->i = i;
 
-  pony_sendv(ctx, to, &m->msg, &m->msg);
+  pony_sendv(ctx, to, &m->msg, &m->msg, id <= ACTORMSG_APPLICATION_START);
 }
 
 #ifdef USE_ACTOR_CONTINUATIONS
