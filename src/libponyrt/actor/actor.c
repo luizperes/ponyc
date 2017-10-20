@@ -27,6 +27,7 @@ enum
   FLAG_UNSCHEDULED = 1 << 3,
   FLAG_PENDINGDESTROY = 1 << 4,
   FLAG_OVERLOADED = 1 << 5,
+  FLAG_UNDER_PRESSURE = 1 << 5,
 };
 
 static bool actor_noblock = false;
@@ -506,16 +507,18 @@ void ponyint_maybe_mute(pony_ctx_t* ctx, pony_actor_t* to)
   if(ctx->current != NULL)
   {
     // only mute a sender IF:
-    // 1. the receiver is overloaded or the receiver is muted
+    // 1. the receiver is overloaded/under pressure or the receiver is muted
     // AND
     // 2. the sender isn't overloaded
     // AND
     // 3. we are sending to another actor (as compared to sending to self)
-    if((has_flag(to, FLAG_OVERLOADED) ||
+    if((triggers_muting(to) ||
        (atomic_load_explicit(&to->muted, memory_order_relaxed) > 0)) &&
-      !has_flag(ctx->current, FLAG_OVERLOADED) &&
-      ctx->current != to)
+       !has_flag(ctx->current, FLAG_OVERLOADED) &&
+       ctx->current != to)
+    {
       ponyint_sched_mute(ctx, ctx->current, to);
+    }
   }
 }
 
@@ -669,5 +672,26 @@ bool ponyint_actor_overloaded(pony_actor_t* actor)
 void ponyint_actor_unsetoverloaded(pony_ctx_t* ctx, pony_actor_t* actor)
 {
   unset_flag(actor, FLAG_OVERLOADED);
-  ponyint_sched_unmute_senders(ctx, actor, true);
+  if (!has_flag(actor, FLAG_UNDER_PRESSURE))
+    ponyint_sched_unmute_senders(ctx, actor, true);
 }
+
+PONY_API void pony_apply_backpressure()
+{
+  set_flag(pony_ctx()->current, FLAG_UNDER_PRESSURE);
+}
+
+PONY_API void pony_release_backpressure()
+{
+  pony_ctx_t* ctx = pony_ctx();
+  unset_flag(ctx->current, FLAG_UNDER_PRESSURE);
+  if (!has_flag(ctx->current, FLAG_OVERLOADED))
+      ponyint_sched_unmute_senders(ctx, ctx->current, true);
+}
+
+bool triggers_muting(pony_actor_t* actor)
+{
+  return has_flag(actor, FLAG_OVERLOADED) || has_flag(actor, FLAG_UNDER_PRESSURE);
+}
+
+
