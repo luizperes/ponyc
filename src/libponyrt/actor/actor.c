@@ -693,5 +693,3 @@ bool triggers_muting(pony_actor_t* actor)
 {
   return has_flag(actor, FLAG_OVERLOADED) || has_flag(actor, FLAG_UNDER_PRESSURE);
 }
-
-
